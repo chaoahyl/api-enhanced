@@ -18,15 +18,6 @@ const ALLOWED_API_PATHS = new Set([
   '/x/player/playurl',
 ])
 
-const STREAM_RESPONSE_HEADERS = [
-  'accept-ranges',
-  'content-length',
-  'content-range',
-  'content-type',
-  'etag',
-  'last-modified',
-]
-
 function stringValue(value) {
   return typeof value === 'string' ? value.trim() : ''
 }
@@ -58,28 +49,6 @@ function gatewayPath(request) {
     : ''
 }
 
-function isAllowedMediaURL(rawURL) {
-  try {
-    const parsed = new URL(rawURL)
-    const hostname = parsed.hostname.toLowerCase()
-    return (
-      (parsed.protocol === 'https:' || parsed.protocol === 'http:') &&
-      (hostname === 'bilibili.com' ||
-        hostname.endsWith('.bilibili.com') ||
-        hostname === 'bilivideo.com' ||
-        hostname.endsWith('.bilivideo.com') ||
-        hostname === 'bilivideo.cn' ||
-        hostname.endsWith('.bilivideo.cn') ||
-        hostname === 'hdslb.com' ||
-        hostname.endsWith('.hdslb.com') ||
-        hostname === 'akamaized.net' ||
-        hostname.endsWith('.akamaized.net'))
-    )
-  } catch {
-    return false
-  }
-}
-
 function upstreamHeaders(referer, accept) {
   const headers = {
     Accept: accept,
@@ -91,24 +60,6 @@ function upstreamHeaders(referer, accept) {
   const cookie = stringValue(process.env.BILIBILI_COOKIE)
   if (cookie) headers.Cookie = cookie
   return headers
-}
-
-function copyStreamHeaders(response, upstreamHeaders) {
-  for (const name of STREAM_RESPONSE_HEADERS) {
-    const value = upstreamHeaders[name]
-    if (value !== undefined) response.set(name, String(value))
-  }
-  response.set('Cache-Control', 'no-store')
-}
-
-function validateMediaRedirect(options) {
-  const nextURL =
-    options.href || `${options.protocol}//${options.hostname}${options.path}`
-  if (!isAllowedMediaURL(nextURL)) {
-    throw new Error('Bilibili media redirect host is not allowed')
-  }
-  options.headers.Referer = BILIBILI_REFERER
-  options.headers['User-Agent'] = BILIBILI_USER_AGENT
 }
 
 async function proxyBilibiliAPI(request, response, path) {
@@ -137,49 +88,6 @@ async function proxyBilibiliAPI(request, response, path) {
   response.send(Buffer.from(upstream.data))
 }
 
-async function proxyBilibiliStream(request, response) {
-  const rawURL = stringValue(request.query.url)
-  if (!isAllowedMediaURL(rawURL)) {
-    response.status(400).send({
-      code: 400,
-      message: 'Bilibili media URL is invalid or not allowed',
-    })
-    return
-  }
-
-  const headers = upstreamHeaders(
-    BILIBILI_REFERER,
-    stringValue(request.headers.accept) ||
-      'audio/mp4, audio/mpeg, audio/*;q=0.9, */*;q=0.8',
-  )
-  const range = stringValue(request.headers.range)
-  if (range) headers.Range = range
-
-  const upstream = await axios({
-    method: request.method.toLowerCase(),
-    url: rawURL,
-    headers,
-    responseType: 'stream',
-    timeout: BILIBILI_REQUEST_TIMEOUT_MS,
-    maxRedirects: 3,
-    beforeRedirect: validateMediaRedirect,
-    proxy: false,
-    validateStatus: () => true,
-  })
-
-  response.status(upstream.status)
-  copyStreamHeaders(response, upstream.headers)
-  if (request.method === 'HEAD') {
-    if (upstream.data && typeof upstream.data.destroy === 'function') {
-      upstream.data.destroy()
-    }
-    response.end()
-    return
-  }
-  upstream.data.on('error', () => response.destroy())
-  upstream.data.pipe(response)
-}
-
 function createBilibiliGateway(logger) {
   return async (request, response) => {
     const expectedToken = stringValue(
@@ -201,25 +109,17 @@ function createBilibiliGateway(logger) {
     }
 
     const path = gatewayPath(request)
-    const isStreamRequest = path === '/stream'
-    const methodAllowed = isStreamRequest
-      ? request.method === 'GET' || request.method === 'HEAD'
-      : request.method === 'GET'
-    if (!methodAllowed) {
+    if (request.method !== 'GET') {
       response.status(405).send({ code: 405, message: 'Method not allowed' })
       return
     }
-    if (!isStreamRequest && !ALLOWED_API_PATHS.has(path)) {
+    if (!ALLOWED_API_PATHS.has(path)) {
       response.status(404).send({ code: 404, message: 'Route not found' })
       return
     }
 
     try {
-      if (isStreamRequest) {
-        await proxyBilibiliStream(request, response)
-      } else {
-        await proxyBilibiliAPI(request, response, path)
-      }
+      await proxyBilibiliAPI(request, response, path)
       logger.info(`Bilibili gateway: ${request.method} ${path}`)
     } catch (error) {
       logger.error(`Bilibili gateway failed: ${request.method} ${path}`, {

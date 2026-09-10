@@ -136,6 +136,8 @@ $ sudo docker run -d -p 3000:3000 ncm-api
 | **ENABLE_FLAC**            | `true`                               | 是否启用无损音质（FLAC）。                                    |
 | **SELECT_MAX_BR**          | `false`                              | 启用无损音质时，是否选择最高码率音质。                                |
 | **FOLLOW_SOURCE_ORDER**    | `true`                               | 是否严格按照音源列表顺序进行匹配。                                  |
+| **AHYLO_BILIBILI_GATEWAY_TOKEN** | 无 | 启用 `/bilibili/*` 网关所需的 Bearer 密钥，必须与 `ahylo-api` 的 `BILIBILI_API_TOKEN` 相同。 |
+| **BILIBILI_COOKIE**        | 无                                   | B 站网关可选登录 Cookie，只能通过部署环境变量配置，不能提交到仓库。            |
 
 ---
 

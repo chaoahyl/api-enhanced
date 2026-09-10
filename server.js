@@ -10,6 +10,7 @@ const { cookieToJson } = require('./util/index')
 const fileUpload = require('express-fileupload')
 const decode = require('safe-decode-uri-component')
 const logger = require('./util/logger.js')
+const { createBilibiliGateway } = require('./util/bilibili-gateway.js')
 const { APP_CONF } = require('./util/config.json')
 
 /**
@@ -258,6 +259,12 @@ async function constructServer(moduleDefs) {
       parseNested: true,
     }),
   )
+
+  /**
+   * Ahylo's authenticated Bilibili gateway. It is mounted before the public
+   * API cache so stream responses and upstream errors are never cached.
+   */
+  app.use('/bilibili', createBilibiliGateway(logger))
 
   /**
    * Cache

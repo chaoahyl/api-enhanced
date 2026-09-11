@@ -262,7 +262,8 @@ async function constructServer(moduleDefs) {
 
   /**
    * Ahylo's authenticated Bilibili gateway. It is mounted before the public
-   * API cache so Bilibili metadata responses and upstream errors are never cached.
+   * API cache. The gateway only keeps successful metadata in its own bounded,
+   * route-specific cache; upstream errors are never cached.
    */
   app.use('/bilibili', createBilibiliGateway(logger))
 

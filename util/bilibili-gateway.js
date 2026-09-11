@@ -1,4 +1,5 @@
 const crypto = require('crypto')
+const https = require('https')
 const { default: axios } = require('axios')
 
 const BILIBILI_API_ORIGIN = 'https://api.bilibili.com'
@@ -7,6 +8,15 @@ const BILIBILI_SEARCH_REFERER = 'https://search.bilibili.com/'
 const BILIBILI_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36'
 const BILIBILI_REQUEST_TIMEOUT_MS = 10000
+const BILIBILI_GATEWAY_CACHE_MAX_ENTRIES = 512
+const BILIBILI_HTTPS_AGENT = new https.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 1000,
+  maxSockets: 32,
+  maxFreeSockets: 8,
+})
+const bilibiliGatewayCache = new Map()
+const bilibiliGatewayRequests = new Map()
 
 const ALLOWED_API_PATHS = new Set([
   '/x/web-interface/nav',
@@ -62,8 +72,63 @@ function upstreamHeaders(referer, accept) {
   return headers
 }
 
-async function proxyBilibiliAPI(request, response, path) {
-  const parsedRequestURL = requestURL(request)
+function gatewayCacheTTL(path) {
+  if (path === '/x/web-interface/nav') return 6 * 60 * 60 * 1000
+  if (path.includes('/search/')) return 10 * 60 * 1000
+  if (path.includes('/playurl')) return 2 * 60 * 1000
+  return 30 * 60 * 1000
+}
+
+function gatewayCacheKey(path, parsedRequestURL) {
+  const params = new URLSearchParams(parsedRequestURL.searchParams)
+  // WBI signatures change every request while the signed business parameters
+  // and their successful JSON response remain cacheable for a short period.
+  params.delete('w_rid')
+  params.delete('wts')
+  params.sort()
+  return `${path}?${params.toString()}`
+}
+
+function cachedGatewayResponse(key) {
+  const cached = bilibiliGatewayCache.get(key)
+  if (!cached) return null
+  if (cached.expiresAt <= Date.now()) {
+    bilibiliGatewayCache.delete(key)
+    return null
+  }
+  bilibiliGatewayCache.delete(key)
+  bilibiliGatewayCache.set(key, cached)
+  return cached.value
+}
+
+function isSuccessfulBilibiliPayload(result, path) {
+  if (result.status !== 200) return false
+  try {
+    const payload = JSON.parse(result.data.toString('utf8'))
+    return (
+      payload &&
+      (payload.code === 0 ||
+        (path === '/x/web-interface/nav' && payload.code === -101))
+    )
+  } catch {
+    return false
+  }
+}
+
+function rememberGatewayResponse(key, value, ttl) {
+  bilibiliGatewayCache.delete(key)
+  while (bilibiliGatewayCache.size >= BILIBILI_GATEWAY_CACHE_MAX_ENTRIES) {
+    const oldestKey = bilibiliGatewayCache.keys().next().value
+    if (!oldestKey) break
+    bilibiliGatewayCache.delete(oldestKey)
+  }
+  bilibiliGatewayCache.set(key, {
+    value,
+    expiresAt: Date.now() + ttl,
+  })
+}
+
+async function fetchBilibiliAPI(parsedRequestURL, path) {
   const upstreamURL = `${BILIBILI_API_ORIGIN}${path}${parsedRequestURL.search}`
   const referer = path.includes('/search/')
     ? BILIBILI_SEARCH_REFERER
@@ -76,16 +141,52 @@ async function proxyBilibiliAPI(request, response, path) {
     timeout: BILIBILI_REQUEST_TIMEOUT_MS,
     maxRedirects: 0,
     proxy: false,
+    httpsAgent: BILIBILI_HTTPS_AGENT,
     validateStatus: () => true,
   })
 
-  response.status(upstream.status)
-  response.set(
-    'Content-Type',
-    upstream.headers['content-type'] || 'application/json; charset=utf-8',
+  return {
+    status: upstream.status,
+    contentType:
+      upstream.headers['content-type'] || 'application/json; charset=utf-8',
+    data: Buffer.from(upstream.data),
+  }
+}
+
+async function loadBilibiliAPI(parsedRequestURL, path) {
+  const cacheKey = gatewayCacheKey(path, parsedRequestURL)
+  const cached = cachedGatewayResponse(cacheKey)
+  if (cached) return { result: cached, cacheStatus: 'HIT' }
+
+  const pending = bilibiliGatewayRequests.get(cacheKey)
+  if (pending) return { result: await pending, cacheStatus: 'COALESCED' }
+
+  const request = fetchBilibiliAPI(parsedRequestURL, path)
+  bilibiliGatewayRequests.set(cacheKey, request)
+  try {
+    const result = await request
+    if (isSuccessfulBilibiliPayload(result, path)) {
+      rememberGatewayResponse(cacheKey, result, gatewayCacheTTL(path))
+    }
+    return { result, cacheStatus: 'MISS' }
+  } finally {
+    if (bilibiliGatewayRequests.get(cacheKey) === request) {
+      bilibiliGatewayRequests.delete(cacheKey)
+    }
+  }
+}
+
+async function proxyBilibiliAPI(request, response, path) {
+  const { result, cacheStatus } = await loadBilibiliAPI(
+    requestURL(request),
+    path,
   )
+
+  response.status(result.status)
+  response.set('Content-Type', result.contentType)
   response.set('Cache-Control', 'no-store')
-  response.send(Buffer.from(upstream.data))
+  response.set('X-Ahylo-Gateway-Cache', cacheStatus)
+  response.send(result.data)
 }
 
 function createBilibiliGateway(logger) {

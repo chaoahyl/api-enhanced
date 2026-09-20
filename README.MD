@@ -132,11 +132,11 @@ $ sudo docker run -d -p 3000:3000 ncm-api
 | **ENABLE_PROXY**           | `false`                              | 是否启用反向代理功能。                                        |
 | **PROXY_URL**              | `https://your-proxy-url.com/?proxy=` | 代理服务地址。仅当 `ENABLE_PROXY=true` 时生效。                 |
 | **ENABLE_RANDOM_CN_IP**    | `false`                              | 是否默认启用随机中国IP。启用后，所有请求默认使用随机中国IP，除非请求参数 `randomCNIP` 显式关闭。 |
-| **ENABLE_GENERAL_UNBLOCK** | `true`                               | 是否启用全局解灰（推荐开启）。开启后所有歌曲都尝试自动解锁。                     |
+| **ENABLE_GENERAL_UNBLOCK** | `false`                              | 是否启用全局解灰。显式传入 `unblock=false` 时始终保留网易云官方地址查询，便于后端准确区分官方源与解灰源。 |
 | **ENABLE_FLAC**            | `true`                               | 是否启用无损音质（FLAC）。                                    |
 | **SELECT_MAX_BR**          | `false`                              | 启用无损音质时，是否选择最高码率音质。                                |
 | **FOLLOW_SOURCE_ORDER**    | `true`                               | 是否严格按照音源列表顺序进行匹配。                                  |
-| **AHYLO_BILIBILI_GATEWAY_TOKEN** | 无 | 启用 `/bilibili/*` JSON 网关所需的 Bearer 密钥，必须与 `ahylo-api` 的 `BILIBILI_API_TOKEN` 相同。 |
+| **MUSIC_BILIBILI_GATEWAY_TOKEN** | 无 | 启用 `/bilibili/*` JSON 网关所需的 Bearer 密钥，必须与 `go-music-api` 的 `BILIBILI_API_TOKEN` 相同。旧变量 `AHYLO_BILIBILI_GATEWAY_TOKEN` 仍兼容。 |
 | **BILIBILI_COOKIE**        | 无                                   | B 站 JSON 网关可选登录 Cookie，只能通过部署环境变量配置，不能提交到仓库。       |
 
 ---

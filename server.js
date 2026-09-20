@@ -261,7 +261,7 @@ async function constructServer(moduleDefs) {
   )
 
   /**
-   * Ahylo's authenticated Bilibili gateway. It is mounted before the public
+   * Authenticated music-service Bilibili gateway. It is mounted before the public
    * API cache. The gateway only keeps successful metadata in its own bounded,
    * route-specific cache; upstream errors are never cached.
    */
@@ -343,7 +343,8 @@ async function constructServer(moduleDefs) {
         // 夹带私货部分：如果开启了通用解锁，并且是获取歌曲URL的接口，则尝试解锁（如果需要的话）ヾ(≧▽≦*)o
         if (
           req.baseUrl === '/song/url/v1' &&
-          process.env.ENABLE_GENERAL_UNBLOCK === 'true'
+          process.env.ENABLE_GENERAL_UNBLOCK === 'true' &&
+          String(query.unblock).toLowerCase() !== 'false'
         ) {
           const song = moduleResponse.body.data[0]
           if (

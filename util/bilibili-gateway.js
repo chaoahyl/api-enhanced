@@ -185,6 +185,7 @@ async function proxyBilibiliAPI(request, response, path) {
   response.status(result.status)
   response.set('Content-Type', result.contentType)
   response.set('Cache-Control', 'no-store')
+  response.set('X-Music-Gateway-Cache', cacheStatus)
   response.set('X-Ahylo-Gateway-Cache', cacheStatus)
   response.send(result.data)
 }
@@ -192,7 +193,8 @@ async function proxyBilibiliAPI(request, response, path) {
 function createBilibiliGateway(logger) {
   return async (request, response) => {
     const expectedToken = stringValue(
-      process.env.AHYLO_BILIBILI_GATEWAY_TOKEN,
+      process.env.MUSIC_BILIBILI_GATEWAY_TOKEN ||
+        process.env.AHYLO_BILIBILI_GATEWAY_TOKEN,
     )
     if (!expectedToken) {
       response.status(503).send({
